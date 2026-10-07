@@ -17,6 +17,14 @@ interface.
 > 🔒 **Use it on your LAN.** Point the app at ASF's LAN IP (e.g. `192.168.x.x:1242`), not a public address.
 > Expose the ASF IPC to the internet only behind a tunnel plus ASF's `IPCPassword`.
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/scan.png" width="30%" alt="Scan a QR login">
+  <img src="docs/screenshots/codes.png" width="30%" alt="Steam Guard codes">
+  <img src="docs/screenshots/trade.png" width="30%" alt="Trade confirmations">
+</p>
+
 ## Why use it
 
 - **Many accounts.** If ASF manages several Steam accounts, this gives you one place to approve QR logins, clear
