@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<Nullable>enable</Nullable>
+		<LangVersion>latest</LangVersion>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<AssemblyName>SteamASF2FA</AssemblyName>
+		<RootNamespace>QrLoginApprover</RootNamespace>
+		<Version>1.0.0.0</Version>
+		<Description>Approve Steam QR logins from another device, using ASF as the "phone".</Description>
+		<GenerateDocumentationFile>false</GenerateDocumentationFile>
+		<TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+
+		<!-- Path to the ASF binaries this plugin is built against.
+		     Default: ../asf (a folder containing ArchiSteamFarm.dll, e.g. from ASF-generic.zip). -->
+		<ASFPath Condition="'$(ASFPath)' == ''">$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', 'asf'))</ASFPath>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<FrameworkReference Include="Microsoft.AspNetCore.App" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Reference Include="ArchiSteamFarm">
+			<HintPath>$(ASFPath)ArchiSteamFarm.dll</HintPath>
+			<Private>false</Private>
+		</Reference>
+		<!-- Provided by ASF at runtime; referenced here only so we can compile against SteamKit2 types. -->
+		<Reference Include="SteamKit2">
+			<HintPath>$(ASFPath)SteamKit2.dll</HintPath>
+			<Private>false</Private>
+		</Reference>
+		<Reference Include="protobuf-net.Core">
+			<HintPath>$(ASFPath)protobuf-net.Core.dll</HintPath>
+			<Private>false</Private>
+		</Reference>
+		<Reference Include="protobuf-net">
+			<HintPath>$(ASFPath)protobuf-net.dll</HintPath>
+			<Private>false</Private>
+		</Reference>
+		<PackageReference Include="System.Composition.AttributedModel" Version="10.0.12" IncludeAssets="compile" />
+	</ItemGroup>
+</Project>

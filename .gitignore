@@ -1,0 +1,37 @@
+# Build output
+bin/
+obj/
+*.user
+
+# Local ASF runtime used for testing (download ASF-generic.zip into ./asf)
+asf/
+
+# Scratch / reference material
+_asf/
+_tmpl/
+_runtime.zip
+*.log
+*.err
+
+# Node probe: keep sources, ignore install + secrets + run artifacts
+tools/probe/node_modules/
+tools/probe/package-lock.json
+tools/probe/*.result
+# anything ASF-related (credentials / bot dumps) except the manifest
+tools/probe/*.json
+tools/probe/*.db
+tools/probe/*.maFile
+!tools/probe/package.json
+
+# IDE
+.vs/
+.idea/
+*.iml
+
+# Android
+app-android/.gradle/
+app-android/build/
+app-android/app/build/
+app-android/local.properties
+app-android/captures/
+
