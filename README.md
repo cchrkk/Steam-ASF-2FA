@@ -20,9 +20,10 @@ interface.
 ## Screenshots
 
 <p align="center">
-  <img src="docs/screenshots/scan.png" width="30%" alt="Scan a QR login">
-  <img src="docs/screenshots/codes.png" width="30%" alt="Steam Guard codes">
-  <img src="docs/screenshots/trade.png" width="30%" alt="Trade confirmations">
+  <img src="docs/screenshots/scan.png" width="24%" alt="Start a QR login">
+  <img src="docs/screenshots/qr-login.png" width="24%" alt="Approve a QR login">
+  <img src="docs/screenshots/codes.png" width="24%" alt="Steam Guard codes">
+  <img src="docs/screenshots/trade.png" width="24%" alt="Trade confirmations">
 </p>
 
 ## Why use it
