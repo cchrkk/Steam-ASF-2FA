@@ -1,7 +1,9 @@
 package tk.chrk.qrloginapprover.ui
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,18 +12,27 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.Devices
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.VerifiedUser
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,11 +41,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.launch
 import tk.chrk.qrloginapprover.R
 import tk.chrk.qrloginapprover.data.ApiClient
@@ -45,7 +59,7 @@ import tk.chrk.qrloginapprover.data.SteamProfile
 private val ChallengeRegex = Regex("""https?://s\.team/q/\d+/\d+""", RegexOption.IGNORE_CASE)
 
 @Composable
-fun QrScreen(api: ApiClient, selected: BotInfo?, modifier: Modifier = Modifier) {
+fun QrScreen(api: ApiClient, selected: BotInfo?, profile: SteamProfile?, modifier: Modifier = Modifier) {
 	val scope = rememberCoroutineScope()
 
 	var cameraOn by remember { mutableStateOf(false) }
@@ -53,29 +67,11 @@ fun QrScreen(api: ApiClient, selected: BotInfo?, modifier: Modifier = Modifier) 
 	var status by remember { mutableStateOf<String?>(null) }
 	var pending by remember { mutableStateOf<String?>(null) }
 	var info by remember { mutableStateOf<QrInfo?>(null) }
-	var profile by remember { mutableStateOf<SteamProfile?>(null) }
-	var profileLoaded by remember { mutableStateOf(false) }
 
 	fun reset() {
 		pending = null
 		info = null
-		profile = null
-		profileLoaded = false
 		busy = false
-	}
-
-	fun refreshProfile(bot: BotInfo) {
-		scope.launch {
-			profile = api.getSteamProfile(bot.steamId.toString())
-			profileLoaded = true
-		}
-	}
-
-	// Load the account profile as soon as the selected bot changes
-	LaunchedEffect(selected?.name) {
-		val bot = selected ?: return@LaunchedEffect
-		profileLoaded = false
-		refreshProfile(bot)
 	}
 
 	fun handleScan(raw: String) {
@@ -86,7 +82,7 @@ fun QrScreen(api: ApiClient, selected: BotInfo?, modifier: Modifier = Modifier) 
 		val match = ChallengeRegex.find(raw)?.value ?: return
 		val bot = selected ?: return
 
-		cameraOn = false // stop scanning
+		cameraOn = false
 		busy = true
 		status = null
 
@@ -116,7 +112,7 @@ fun QrScreen(api: ApiClient, selected: BotInfo?, modifier: Modifier = Modifier) 
 		scope.launch {
 			try {
 				val result = api.qrApprove(bot.name, url, approve)
-				status = if (result.success) (if (approve) "Approved ✅" else "Denied") else (result.error ?: "Failed")
+				status = if (result.success) (if (approve) "Approved" else "Denied") else (result.error ?: "Failed")
 			} catch (e: Exception) {
 				status = e.message
 			} finally {
@@ -125,95 +121,58 @@ fun QrScreen(api: ApiClient, selected: BotInfo?, modifier: Modifier = Modifier) 
 		}
 	}
 
+	if (selected == null) {
+		EmptyState(Icons.Default.QrCodeScanner, "No accounts", "No bot with ASF 2FA found on this instance.", modifier.padding(16.dp))
+		return
+	}
+
+	if (pending != null) {
+		Dialog(
+			onDismissRequest = { },
+			properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+		) {
+			Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
+				ConfirmPage(info, profile, selected, busy, onApprove = { decide(true) }, onDeny = { decide(false) }, onCancel = { reset(); status = null })
+			}
+		}
+
+		return
+	}
+
 	Column(
 		modifier = modifier
 			.fillMaxSize()
-			.padding(16.dp),
+			.padding(24.dp),
 		horizontalAlignment = Alignment.CenterHorizontally,
 	) {
-		val bot = selected
-
-		if (bot == null) {
-			Text("No bot with ASF 2FA found.", color = MaterialTheme.colorScheme.error)
-			return@Column
-		}
-
-		if (pending != null) {
-			// Confirmation page (camera is off)
-			val details = info?.info
-
-			Column(
-				modifier = Modifier.fillMaxSize(),
-				horizontalAlignment = Alignment.CenterHorizontally,
-			) {
-				Spacer(Modifier.height(8.dp))
-
-				if (profileLoaded && profile?.avatarUrl != null) {
-					AsyncImage(
-						model = profile!!.avatarUrl,
-						contentDescription = null,
-						modifier = Modifier.size(96.dp).clip(CircleShape),
-					)
-				} else {
-					Image(painter = painterResource(R.drawable.ic_logo), contentDescription = null, modifier = Modifier.size(96.dp))
-				}
-
-				Spacer(Modifier.height(12.dp))
-				Text(profile?.personaName ?: bot.name, style = MaterialTheme.typography.headlineSmall)
-				Text("Signing in as (this ASF account)", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-				Text(bot.steamId.toString(), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
-
-				Spacer(Modifier.height(20.dp))
-
-				Card(
-					modifier = Modifier.fillMaxWidth(),
-					colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-				) {
-					Column(modifier = Modifier.padding(16.dp)) {
-						DetailRow("Device", info?.deviceFriendlyName ?: "—")
-						DetailRow("IP", info?.ip ?: "—")
-						DetailRow("Location", listOfNotNull(details?.city, details?.state, details?.country).joinToString(", ").ifBlank { "—" })
-						DetailRow("Platform", platformName(details?.platformType))
-						DetailRow("Same location", if (details?.locationMismatch == true) "⚠️ mismatch" else "yes")
-						DetailRow("High usage", if (details?.highUsageLogin == true) "⚠️ unusual" else "no")
-					}
-				}
-
-				Spacer(Modifier.weight(1f))
-
-				if (busy) {
-					CircularProgressIndicator()
-				} else {
-					Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-						Button(onClick = { decide(true) }, modifier = Modifier.weight(1f)) { Text("Approve") }
-						OutlinedButton(onClick = { decide(false) }, modifier = Modifier.weight(1f)) { Text("Deny") }
-					}
-					TextButton(onClick = { reset(); status = null }) { Text("Cancel") }
-				}
-			}
-
-			return@Column
-		}
-
-		// Start / camera
 		if (!cameraOn) {
 			Column(
 				modifier = Modifier.fillMaxSize(),
 				horizontalAlignment = Alignment.CenterHorizontally,
 				verticalArrangement = Arrangement.Center,
 			) {
-				Image(painter = painterResource(R.drawable.ic_logo), contentDescription = null, modifier = Modifier.height(72.dp))
-				Spacer(Modifier.height(24.dp))
-				Text("Sign in on another device", style = MaterialTheme.typography.headlineSmall)
+				Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(148.dp)) {
+					Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+						Image(painter = painterResource(R.drawable.ic_logo), contentDescription = null, modifier = Modifier.size(78.dp))
+					}
+				}
+
+				Spacer(Modifier.height(28.dp))
+				Text("Sign in on another device", style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
 				Spacer(Modifier.height(8.dp))
 				Text(
-					"Open Steam on the new PC, choose \"Sign in with QR\", then scan it here. ASF will approve the login for ${bot.name}.",
+					"Open Steam on the new PC, choose \"Sign in with QR\", then scan it here. ASF approves the login for ${selected.name}.",
 					style = MaterialTheme.typography.bodyMedium,
 					color = MaterialTheme.colorScheme.onSurfaceVariant,
 					textAlign = TextAlign.Center,
 				)
+
 				Spacer(Modifier.height(32.dp))
-				Button(onClick = { cameraOn = true; status = null }) { Text("Start camera") }
+				Button(onClick = { cameraOn = true; status = null }, modifier = Modifier.height(52.dp)) {
+					Icon(Icons.Default.QrCodeScanner, contentDescription = null)
+					Spacer(Modifier.width(10.dp))
+					Text("Scan QR code", style = MaterialTheme.typography.titleMedium)
+				}
 
 				status?.let {
 					Spacer(Modifier.height(16.dp))
@@ -245,18 +204,70 @@ fun QrScreen(api: ApiClient, selected: BotInfo?, modifier: Modifier = Modifier) 
 			}
 
 			Spacer(Modifier.height(12.dp))
-
 			TextButton(onClick = { cameraOn = false; status = null }) { Text("Stop camera") }
 		}
 	}
 }
 
 @Composable
-private fun DetailRow(label: String, value: String) {
-	Row(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
-		Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-		Spacer(Modifier.weight(1f))
-		Text(value, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.End)
+private fun ConfirmPage(
+	info: QrInfo?,
+	profile: SteamProfile?,
+	bot: BotInfo,
+	busy: Boolean,
+	onApprove: () -> Unit,
+	onDeny: () -> Unit,
+	onCancel: () -> Unit,
+	modifier: Modifier = Modifier,
+) {
+	val details = info?.info
+
+	Column(modifier = modifier.fillMaxSize()) {
+		Box(
+			modifier = Modifier
+				.fillMaxWidth()
+				.background(Brush.linearGradient(Brand.Gradient))
+				.padding(vertical = 28.dp, horizontal = 24.dp),
+		) {
+			Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+				AccountAvatar(profile?.avatarUrl, 84.dp, Modifier.clip(CircleShape))
+				Spacer(Modifier.height(14.dp))
+				Text(profile?.personaName ?: bot.name, style = MaterialTheme.typography.headlineSmall, color = Color.White)
+				Text("will be signed in on this device", style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = 0.85f))
+				Spacer(Modifier.height(4.dp))
+				Text(bot.steamId.toString(), style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = Color.White.copy(alpha = 0.7f))
+			}
+		}
+
+		Column(modifier = Modifier.fillMaxSize().padding(20.dp)) {
+			SectionTitle("Login request")
+
+			Card(
+				colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+				modifier = Modifier.fillMaxWidth(),
+			) {
+				Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+					DetailRow(Icons.Default.Devices, "Device", info?.deviceFriendlyName ?: "—")
+					DetailRow(Icons.Default.Language, "IP", info?.ip ?: "—")
+					DetailRow(Icons.Default.Place, "Location", listOfNotNull(details?.city, details?.state, details?.country).joinToString(", ").ifBlank { "—" })
+					DetailRow(Icons.Default.Computer, "Platform", platformName(details?.platformType))
+					DetailRow(Icons.Default.VerifiedUser, "Same location", if (details?.locationMismatch == true) "mismatch" else "yes")
+					DetailRow(Icons.Default.Warning, "Usage", if (details?.highUsageLogin == true) "unusual" else "normal")
+				}
+			}
+
+			Spacer(Modifier.weight(1f))
+
+			if (busy) {
+				CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
+			} else {
+				Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+					Button(onClick = onApprove, modifier = Modifier.weight(1.4f).height(50.dp)) { Text("Approve", style = MaterialTheme.typography.titleMedium) }
+					OutlinedButton(onClick = onDeny, modifier = Modifier.weight(1f).height(50.dp)) { Text("Deny") }
+				}
+				TextButton(onClick = onCancel, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("Cancel") }
+			}
+		}
 	}
 }
 
