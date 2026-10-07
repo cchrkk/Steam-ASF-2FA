@@ -2,6 +2,7 @@ package tk.chrk.qrloginapprover
 
 import android.Manifest
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -15,6 +16,8 @@ class MainActivity : ComponentActivity() {
 	override fun onCreate(savedInstanceState: Bundle?) {
 		enableEdgeToEdge()
 		super.onCreate(savedInstanceState)
+		// Keep codes and confirmation details out of screenshots and the recents preview
+		window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
 		requestCamera.launch(Manifest.permission.CAMERA)
 		setContent {
 			SteamAsf2faTheme {

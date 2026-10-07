@@ -73,6 +73,10 @@ The plugin implements ASF's built-in plugin updates (`IGitHubPluginUpdates`). To
 }
 ```
 
+> ⚠️ **Auto-updates run code from releases automatically.** Enable them only for repositories you trust: a
+> compromised release (or CI action) executes inside your ASF process, with access to every bot. This repo's
+> releases ship a `SHA256SUMS` you can verify.
+
 Releases are built **against a specific ASF version**, and the plugin and the app share a version independent of ASF
 (so every build is a new version). The release notes state which ArchiSteamFarm version it was built against and list
 the changes since the previous release. A daily GitHub Action checks for a new ArchiSteamFarm release and, when there

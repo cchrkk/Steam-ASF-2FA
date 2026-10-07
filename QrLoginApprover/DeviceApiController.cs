@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using ArchiSteamFarm.Steam;
 using ArchiSteamFarm.Steam.Data;
 using Microsoft.AspNetCore.Mvc;
@@ -13,22 +14,31 @@ namespace QrLoginApprover;
 [ApiController]
 [Route("SteamASF2FA/api")]
 public sealed class DeviceApiController : ControllerBase {
+	private const int CheapLimitPerMinute = 120;
+	private const int SteamLimitPerMinute = 30;
+
 	[HttpGet("bots")]
 	public IActionResult GetBots() {
-		if (!TryAuthorize(out _, out IActionResult? error)) {
-			return error!;
+		if (!TryAuthorize(out Device? device, out IActionResult? error)) {
+			return error;
 		}
 
-		return Ok(Bot.BotsReadOnly?.Values.Select(static bot => new BotInfo(bot.BotName, bot.SteamID, bot.HasMobileAuthenticator, bot.IsConnectedAndLoggedOn)) ?? []);
+		IReadOnlyDictionary<string, Bot>? bots = Bot.BotsReadOnly;
+
+		IEnumerable<BotInfo> result = bots == null
+			? []
+			: bots.Values.Where(bot => IsAllowed(device, bot.BotName)).Select(static bot => new BotInfo(bot.BotName, bot.SteamID, bot.HasMobileAuthenticator, bot.IsConnectedAndLoggedOn));
+
+		return Ok(result);
 	}
 
 	[HttpPost("qr/info")]
 	public async Task<IActionResult> PostQrInfo([FromBody] ScanRequest request) {
-		if (!TryAuthorize(out _, out IActionResult? error)) {
-			return error!;
+		if (!TryAuthorize(out Device? device, out IActionResult? error)) {
+			return error;
 		}
 
-		if (!TryResolveBot(request, out Bot? bot, out int version, out ulong clientId, out error)) {
+		if (!TryResolveBot(device, request, out Bot? bot, out int version, out ulong clientId, out error)) {
 			return error!;
 		}
 
@@ -39,11 +49,11 @@ public sealed class DeviceApiController : ControllerBase {
 
 	[HttpPost("qr/approve")]
 	public async Task<IActionResult> PostQrApprove([FromBody] ApproveRequest request) {
-		if (!TryAuthorize(out _, out IActionResult? error)) {
-			return error!;
+		if (!TryAuthorize(out Device? device, out IActionResult? error)) {
+			return error;
 		}
 
-		if (!TryResolveBot(request, out Bot? bot, out int version, out ulong clientId, out error)) {
+		if (!TryResolveBot(device, request, out Bot? bot, out int version, out ulong clientId, out error)) {
 			return error!;
 		}
 
@@ -54,11 +64,11 @@ public sealed class DeviceApiController : ControllerBase {
 
 	[HttpGet("confirmations")]
 	public async Task<IActionResult> GetConfirmations([FromQuery] string? bots) {
-		if (!TryAuthorize(out _, out IActionResult? error)) {
-			return error!;
+		if (!TryAuthorize(out Device? device, out IActionResult? error)) {
+			return error;
 		}
 
-		List<Bot> resolved = ResolveBots(bots);
+		List<Bot> resolved = ResolveBots(device, bots);
 		Dictionary<string, object> response = [];
 
 		foreach (Bot bot in resolved) {
@@ -76,11 +86,11 @@ public sealed class DeviceApiController : ControllerBase {
 
 	[HttpPost("confirmations")]
 	public async Task<IActionResult> PostConfirmations([FromBody] ConfirmationsRequest request) {
-		if (!TryAuthorize(out _, out IActionResult? error)) {
-			return error!;
+		if (!TryAuthorize(out Device? device, out IActionResult? error)) {
+			return error;
 		}
 
-		List<Bot> resolved = ResolveBots(request.Bots is { Count: > 0 } ? string.Join(',', request.Bots) : null);
+		List<Bot> resolved = ResolveBots(device, request.Bots is { Count: > 0 } ? string.Join(',', request.Bots) : null);
 		EMobileConfirmationType? acceptedType = request.AcceptedType.HasValue ? (EMobileConfirmationType) request.AcceptedType.Value : null;
 		IReadOnlyCollection<ulong>? acceptedCreatorIDs = request.AcceptedCreatorIDs is { Count: > 0 } ? request.AcceptedCreatorIDs : null;
 
@@ -104,11 +114,12 @@ public sealed class DeviceApiController : ControllerBase {
 	}
 
 	[HttpGet("code")]
-	public async Task<IActionResult> GetCode([FromQuery] string? bots) {		if (!TryAuthorize(out _, out IActionResult? error)) {
-			return error!;
+	public async Task<IActionResult> GetCode([FromQuery] string? bots) {
+		if (!TryAuthorize(out Device? device, out IActionResult? error, CheapLimitPerMinute)) {
+			return error;
 		}
 
-		List<Bot> resolved = ResolveBots(bots);
+		List<Bot> resolved = ResolveBots(device, bots);
 		Dictionary<string, object> response = [];
 
 		foreach (Bot bot in resolved) {
@@ -122,11 +133,11 @@ public sealed class DeviceApiController : ControllerBase {
 
 	[HttpGet("tradeoffers")]
 	public async Task<IActionResult> GetTradeOffers([FromQuery] string? bot) {
-		if (!TryAuthorize(out _, out IActionResult? error)) {
-			return error!;
+		if (!TryAuthorize(out Device? device, out IActionResult? error)) {
+			return error;
 		}
 
-		Bot? resolved = ResolveBot(bot);
+		Bot? resolved = ResolveBot(device, bot);
 
 		if (resolved == null) {
 			return BadRequest(new { error = $"Unknown bot '{bot}'" });
@@ -139,11 +150,11 @@ public sealed class DeviceApiController : ControllerBase {
 
 	[HttpGet("tradeoffer/{id:long}")]
 	public async Task<IActionResult> GetTradeOffer(long id, [FromQuery] string? bot) {
-		if (!TryAuthorize(out _, out IActionResult? error)) {
-			return error!;
+		if (!TryAuthorize(out Device? device, out IActionResult? error, CheapLimitPerMinute)) {
+			return error;
 		}
 
-		Bot? resolved = ResolveBot(bot);
+		Bot? resolved = ResolveBot(device, bot);
 
 		if (resolved == null) {
 			return BadRequest(new { error = $"Unknown bot '{bot}'" });
@@ -158,7 +169,7 @@ public sealed class DeviceApiController : ControllerBase {
 		return details == null ? NotFound(new { error = $"Trade offer {id} not found" }) : Ok(details);
 	}
 
-	private bool TryAuthorize(out Device? device, out IActionResult? error) {
+	private bool TryAuthorize([NotNullWhen(true)] out Device? device, [NotNullWhen(false)] out IActionResult? error, int limitPerMinute = SteamLimitPerMinute) {
 		error = null;
 
 		string? token = Request.Headers["X-Auth-Token"].FirstOrDefault();
@@ -171,11 +182,18 @@ public sealed class DeviceApiController : ControllerBase {
 			}
 		}
 
-		device = DeviceStore.Validate(token);
+		string? ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+		device = DeviceStore.Validate(token, ip);
 
 		if (device == null) {
 			// Always write a body, otherwise ASF's status-code re-execution would serve the ASF-ui page instead
-			error = Unauthorized(new { error = "Invalid or missing device token" });
+			error = Unauthorized(new { error = "Invalid, missing or expired device token" });
+
+			return false;
+		}
+
+		if (!RateLimit.Allow(device.Id, limitPerMinute)) {
+			error = StatusCode(429, new { error = "Too many requests" });
 
 			return false;
 		}
@@ -183,7 +201,7 @@ public sealed class DeviceApiController : ControllerBase {
 		return true;
 	}
 
-	private bool TryResolveBot(ScanRequest? request, out Bot? bot, out int version, out ulong clientId, out IActionResult? error) {
+	private bool TryResolveBot(Device device, ScanRequest? request, [NotNullWhen(true)] out Bot? bot, out int version, out ulong clientId, [NotNullWhen(false)] out IActionResult? error) {
 		bot = null;
 		version = 0;
 		clientId = 0;
@@ -195,10 +213,10 @@ public sealed class DeviceApiController : ControllerBase {
 			return false;
 		}
 
-		bot = ResolveBot(request.Bot);
+		bot = ResolveBot(device, request.Bot);
 
 		if (bot == null) {
-			error = BadRequest(new { error = $"Unknown bot '{request.Bot}'" });
+			error = BadRequest(new { error = $"Unknown or not allowed bot '{request.Bot}'" });
 
 			return false;
 		}
@@ -218,13 +236,19 @@ public sealed class DeviceApiController : ControllerBase {
 		return true;
 	}
 
-	private static Bot? ResolveBot(string? name) {
+	private static bool IsAllowed(Device? device, string botName) => (device == null) || (device.Bots.Count == 0) || device.Bots.Contains(botName, StringComparer.Ordinal);
+
+	private static Bot? ResolveBot(Device? device, string? name) {
+		if (!IsAllowed(device, name ?? "")) {
+			return null;
+		}
+
 		IReadOnlyDictionary<string, Bot>? bots = Bot.BotsReadOnly;
 
 		return (bots != null) && !string.IsNullOrEmpty(name) && bots.TryGetValue(name, out Bot? bot) ? bot : null;
 	}
 
-	private static List<Bot> ResolveBots(string? bots) {
+	private static List<Bot> ResolveBots(Device device, string? bots) {
 		IReadOnlyDictionary<string, Bot>? all = Bot.BotsReadOnly;
 
 		if (all == null) {
@@ -232,13 +256,13 @@ public sealed class DeviceApiController : ControllerBase {
 		}
 
 		if (string.IsNullOrWhiteSpace(bots)) {
-			return all.Values.ToList();
+			return all.Values.Where(bot => IsAllowed(device, bot.BotName)).ToList();
 		}
 
 		List<Bot> result = [];
 
 		foreach (string name in bots.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)) {
-			if (all.TryGetValue(name, out Bot? bot)) {
+			if (IsAllowed(device, name) && all.TryGetValue(name, out Bot? bot)) {
 				result.Add(bot);
 			}
 		}

@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ArchiSteamFarm.Core;
 
 namespace QrLoginApprover;
 
@@ -19,21 +20,35 @@ internal sealed class Device {
 	[JsonPropertyName("createdAt")]
 	public DateTime CreatedAt { get; set; }
 
+	[JsonPropertyName("expiresAt")]
+	public DateTime ExpiresAt { get; set; }
+
 	[JsonPropertyName("lastUsedAt")]
 	public DateTime? LastUsedAt { get; set; }
+
+	[JsonPropertyName("lastUsedIp")]
+	public string? LastUsedIp { get; set; }
+
+	/// <summary>Bots this device may act on. Empty means every bot.</summary>
+	[JsonPropertyName("bots")]
+	public List<string> Bots { get; set; } = [];
 }
 
 /// <summary>
-///     Persistent store of paired devices, kept in <c>config/QrLoginApprover.json</c> next to ASF's own files.
+///     Persistent store of paired devices, kept in <c>config/SteamASF2FA/devices.json</c> next to ASF's own files.
 /// </summary>
 internal static class DeviceStore {
+	internal static readonly TimeSpan DefaultLifetime = TimeSpan.FromDays(90);
+
 	private static readonly object Lock = new();
+	private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+	private static readonly TimeSpan FlushInterval = TimeSpan.FromSeconds(60);
 
 	private static readonly string FilePath = Path.Combine(Path.Combine(Path.Combine(AppContext.BaseDirectory, "config"), "SteamASF2FA"), "devices.json");
 
-	private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
-
 	private static DeviceFile File = Load();
+
+	private static DateTime LastFlushUtc = DateTime.MinValue;
 
 	private static string Hash(string token) => Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
 
@@ -42,27 +57,53 @@ internal static class DeviceStore {
 			if (System.IO.File.Exists(FilePath)) {
 				return JsonSerializer.Deserialize<DeviceFile>(System.IO.File.ReadAllText(FilePath)) ?? new DeviceFile();
 			}
-		} catch { /* corrupted file, start clean */ }
+		} catch (Exception e) {
+			ASF.ArchiLogger.LogGenericWarningException(e);
+			ASF.ArchiLogger.LogGenericWarning("SteamASF2FA: devices.json is unreadable, keeping a copy and starting empty (all devices must re-pair)");
+
+			try {
+				System.IO.File.Copy(FilePath, $"{FilePath}.corrupt-{DateTime.UtcNow:yyyyMMddHHmmss}", true);
+			} catch { /* best effort */ }
+		}
 
 		return new DeviceFile();
 	}
 
 	private static void Save() {
-		Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-		System.IO.File.WriteAllText(FilePath, JsonSerializer.Serialize(File, JsonOptions));
+		try {
+			Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+			string temp = FilePath + ".tmp";
+			System.IO.File.WriteAllText(temp, JsonSerializer.Serialize(File, JsonOptions));
+			System.IO.File.Move(temp, FilePath, true);
+		} catch (Exception e) {
+			ASF.ArchiLogger.LogGenericWarningException(e);
+		}
 	}
 
-	/// <summary>Creates a new paired device and returns its (id, raw token). The raw token is shown once.</summary>
-	internal static (string Id, string Token) Create(string name) {
+	/// <summary>Writes at most once per <see cref="FlushInterval" /> so a request flood cannot hammer the disk.</summary>
+	private static void FlushIfDue() {
+		if (DateTime.UtcNow - LastFlushUtc < FlushInterval) {
+			return;
+		}
+
+		LastFlushUtc = DateTime.UtcNow;
+		Save();
+	}
+
+	/// <summary>Creates a new paired device and returns its (id, raw token, expiry). The raw token is shown once.</summary>
+	internal static (string Id, string Token, DateTime ExpiresAt) Create(string name, IEnumerable<string>? bots = null) {
 		byte[] bytes = new byte[32];
 		RandomNumberGenerator.Fill(bytes);
 		string token = Base64UrlEncode(bytes);
+		DateTime expiresAt = DateTime.UtcNow.Add(DefaultLifetime);
 
 		Device device = new() {
 			Id = Guid.NewGuid().ToString("N"),
 			Name = name,
 			TokenHash = Hash(token),
-			CreatedAt = DateTime.UtcNow
+			CreatedAt = DateTime.UtcNow,
+			ExpiresAt = expiresAt,
+			Bots = bots?.Where(static bot => !string.IsNullOrWhiteSpace(bot)).Select(static bot => bot.Trim()).Distinct(StringComparer.Ordinal).ToList() ?? []
 		};
 
 		lock (Lock) {
@@ -70,11 +111,11 @@ internal static class DeviceStore {
 			Save();
 		}
 
-		return (device.Id, token);
+		return (device.Id, token, expiresAt);
 	}
 
 	/// <summary>Returns the device owning the given token, or null. Uses a constant-time comparison.</summary>
-	internal static Device? Validate(string? token) {
+	internal static Device? Validate(string? token, string? ip = null) {
 		if (string.IsNullOrEmpty(token)) {
 			return null;
 		}
@@ -82,22 +123,32 @@ internal static class DeviceStore {
 		byte[] candidate = Encoding.UTF8.GetBytes(Hash(token));
 
 		lock (Lock) {
-			Device? match = null;
-
 			foreach (Device device in File.Devices) {
-				if (CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(device.TokenHash), candidate)) {
-					match = device;
-
-					break;
+				if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(device.TokenHash), candidate)) {
+					continue;
 				}
+
+				if ((device.ExpiresAt != default) && (device.ExpiresAt <= DateTime.UtcNow)) {
+					ASF.ArchiLogger.LogGenericWarning($"SteamASF2FA: device '{device.Name}' token expired, re-pairing required");
+
+					return null;
+				}
+
+				if (!string.IsNullOrEmpty(ip) && !string.Equals(device.LastUsedIp, ip, StringComparison.Ordinal)) {
+					if (!string.IsNullOrEmpty(device.LastUsedIp)) {
+						ASF.ArchiLogger.LogGenericWarning($"SteamASF2FA: device '{device.Name}' is being used from a new IP {ip} (was {device.LastUsedIp})");
+					}
+
+					device.LastUsedIp = ip;
+				}
+
+				device.LastUsedAt = DateTime.UtcNow;
+				FlushIfDue();
+
+				return device;
 			}
 
-			if (match != null) {
-				match.LastUsedAt = DateTime.UtcNow;
-				Save();
-			}
-
-			return match;
+			return null;
 		}
 	}
 
@@ -116,6 +167,31 @@ internal static class DeviceStore {
 			}
 
 			return removed > 0;
+		}
+	}
+
+	/// <summary>Issues a fresh token for an existing device, invalidating the previous one. Returns null if unknown.</summary>
+	internal static string? Rotate(string id) {
+		lock (Lock) {
+			Device? device = File.Devices.FirstOrDefault(candidate => candidate.Id == id);
+
+			if (device == null) {
+				return null;
+			}
+
+			byte[] bytes = new byte[32];
+			RandomNumberGenerator.Fill(bytes);
+			string token = Base64UrlEncode(bytes);
+
+			device.TokenHash = Hash(token);
+			device.CreatedAt = DateTime.UtcNow;
+			device.ExpiresAt = DateTime.UtcNow.Add(DefaultLifetime);
+			device.LastUsedAt = null;
+			device.LastUsedIp = null;
+
+			Save();
+
+			return token;
 		}
 	}
 

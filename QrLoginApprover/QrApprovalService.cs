@@ -137,12 +137,21 @@ internal static partial class QrApprovalService {
 		);
 	}
 
-	internal static async Task<ApproveResult> ApproveAsync(Bot bot, int version, ulong clientId, bool approve) {
+	private static async Task<ESessionPersistence> ResolveRequestedPersistenceAsync(Bot bot, int version, ulong clientId) {
+		AuthSessionInfoResult result = await GetSessionInfoAsync(bot, version, clientId).ConfigureAwait(false);
+
+		return result.Info?.RequestedPersistence ?? ESessionPersistence.k_ESessionPersistence_Persistent;
+	}
+
+	internal static async Task<ApproveResult> ApproveAsync(Bot bot, int version, ulong clientId, bool approve, ESessionPersistence? persistence = null) {
 		byte[]? sharedSecret = TryGetSharedSecret(bot);
 
 		if (sharedSecret == null) {
 			return new ApproveResult(false, "This bot has no ASF 2FA (missing shared_secret), cannot approve QR logins", null);
 		}
+
+		// Honour the persistence the requesting client asked for, instead of forcing a remembered session.
+		ESessionPersistence effectivePersistence = persistence ?? await ResolveRequestedPersistenceAsync(bot, version, clientId).ConfigureAwait(false);
 
 		byte[] signature = ComputeSignature(sharedSecret, version, clientId, bot.SteamID);
 
@@ -152,7 +161,7 @@ internal static partial class QrApprovalService {
 			steamid = bot.SteamID,
 			signature = signature,
 			confirm = approve,
-			persistence = ESessionPersistence.k_ESessionPersistence_Persistent
+			persistence = effectivePersistence
 		};
 
 		WebAPI.WebAPIResponse<CAuthentication_UpdateAuthSessionWithMobileConfirmation_Response>? response = await CallAsync<CAuthentication_UpdateAuthSessionWithMobileConfirmation_Response, CAuthentication_UpdateAuthSessionWithMobileConfirmation_Request>(bot, "UpdateAuthSessionWithMobileConfirmation", request).ConfigureAwait(false);

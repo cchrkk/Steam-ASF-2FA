@@ -11,19 +11,22 @@ Base: `http://<asf-host>:1242`. Two authentication schemes.
 ### `POST /Api/SteamASF2FA/Pair` — IPCPassword
 
 ```json
-{ "name": "My Phone" }
+{ "name": "My Phone", "bots": ["MyBot"] }
 ```
+
+`bots` is optional: an allowlist of bots this device may act on. Omit it (or send `[]`) to allow every bot.
 
 ```json
-{ "id": "0123456789abcdef0123456789abcdef", "name": "My Phone", "token": "<opaque device token>" }
+{ "id": "0123456789abcdef0123456789abcdef", "name": "My Phone", "token": "<opaque device token>", "expiresAt": "2027-01-01T00:00:00Z" }
 ```
 
-The `token` is returned **once**. Only its SHA-256 hash is persisted, in `config/SteamASF2FA/devices.json`.
+The `token` is returned **once**. Only its SHA-256 hash is persisted, in `config/SteamASF2FA/devices.json`. Tokens
+**expire** (90 days by default) and must be re-paired; a request with an expired token gets `401`.
 
 ### `GET /Api/SteamASF2FA/Devices` — IPCPassword
 
 ```json
-[ { "Id": "0123456789abcdef0123456789abcdef", "Name": "My Phone", "CreatedAt": "2026-01-01T00:00:00Z", "LastUsedAt": null } ]
+[ { "Id": "0123456789abcdef0123456789abcdef", "Name": "My Phone", "CreatedAt": "2026-01-01T00:00:00Z", "ExpiresAt": "2027-01-01T00:00:00Z", "LastUsedAt": "2026-01-02T00:00:00Z", "LastUsedIp": "203.0.113.10", "Bots": ["MyBot"] } ]
 ```
 
 ### `DELETE /Api/SteamASF2FA/Devices/{id}` — IPCPassword
@@ -31,6 +34,19 @@ The `token` is returned **once**. Only its SHA-256 hash is persisted, in `config
 ```json
 { "revoked": "0123456789abcdef0123456789abcdef" }
 ```
+
+### `POST /Api/SteamASF2FA/Devices/{id}/Rotate` — IPCPassword
+
+Issues a fresh token for an existing device, invalidating the previous one:
+
+```json
+{ "id": "0123456789abcdef0123456789abcdef", "token": "<new device token>" }
+```
+
+### Device API rate limits
+
+Every device-token request is rate limited per device (fixed window, per minute): **30/min** for Steam-backed
+endpoints and **120/min** for the cheap ones. Over the limit returns `429`.
 
 ## Bots
 

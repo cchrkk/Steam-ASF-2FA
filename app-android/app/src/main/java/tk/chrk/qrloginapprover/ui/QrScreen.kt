@@ -160,7 +160,7 @@ fun QrScreen(api: ApiClient, selected: BotInfo?, modifier: Modifier = Modifier) 
 
 				Spacer(Modifier.height(12.dp))
 				Text(profile?.personaName ?: bot.name, style = MaterialTheme.typography.headlineSmall)
-				Text("Account being signed in", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+				Text("Signing in as (this ASF account)", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
 				Text(bot.steamId.toString(), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
 				Spacer(Modifier.height(20.dp))
